@@ -13,6 +13,8 @@ type UserRepository interface {
 	RegisterUser(string, string, string) (*models.User, error)
 	UserFindByEmail(string) (*models.User, error)
 	SaveRefreshToken(int, string) error
+	GetUserProfile(int) (*models.User, error)
+	ClearRefreshToken(string) error
 }
 
 type userRepository struct {
@@ -83,7 +85,14 @@ func (r *userRepository) UserFindByEmail(email string) (*models.User, error) {
 func (r *userRepository) SaveRefreshToken(userID int, refreshToken string) error {
 	query := `UPDATE users SET refreshToken = ? WHERE id = ?`
 
-	result, err := r.db.Exec(query, refreshToken, userID)
+	var token interface{}
+	if refreshToken == "" {
+		token = nil
+	} else {
+		token = refreshToken
+	}
+
+	result, err := r.db.Exec(query, token, userID)
 	if err != nil {
 		return fmt.Errorf("error updating refresh token: %w", err)
 	}
@@ -94,6 +103,30 @@ func (r *userRepository) SaveRefreshToken(userID int, refreshToken string) error
 	}
 	if rowsAffected == 0 {
 		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
+func (r *userRepository) GetUserProfile(userID int) (*models.User, error) {
+	query := `SELECT name, email from users WHERE id = ?`
+
+	var user models.User
+	err := r.db.QueryRow(query, userID).Scan(&user.Name, &user.Email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, fmt.Errorf("error finding user profile: %w", err)
+	}
+	return &user, nil
+}
+
+func (r *userRepository) ClearRefreshToken(refreshToken string) error {
+	query := `UPDATE users SET refreshToken = NULL WHERE refreshToken = ?`
+
+	_, err := r.db.Exec(query, refreshToken)
+	if err != nil {
+		return fmt.Errorf("error clearing refresh token: %w", err)
 	}
 	return nil
 }

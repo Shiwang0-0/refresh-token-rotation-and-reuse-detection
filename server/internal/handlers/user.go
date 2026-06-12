@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/Shiwang0-0/refresh-token-rotation-and-reuse-detection/internal/dto"
 	"github.com/Shiwang0-0/refresh-token-rotation-and-reuse-detection/internal/services"
@@ -71,7 +72,7 @@ func (h *UserHandler) UserLogin(c *fiber.Ctx) error {
 		})
 	}
 
-	accessToken, refreshToken, err := h.userService.LoginUser(data)
+	user, accessToken, refreshToken, err := h.userService.LoginUser(data)
 
 	if err != nil {
 		if errors.Is(err, utils.ErrInvalidCredentials) {
@@ -87,13 +88,98 @@ func (h *UserHandler) UserLogin(c *fiber.Ctx) error {
 		Name:     "refresh_token",
 		Value:    refreshToken,
 		HTTPOnly: true,
-		Secure:   true,
-		SameSite: "Strict",
+		Secure:   false,
+		SameSite: "Lax",
 		MaxAge:   7 * 24 * 60 * 60,
 	})
 
 	// access token sent in response, to be stored in react state
 	context["access_token"] = accessToken
+	context["user"] = user
+
+	return c.Status(200).JSON(context)
+}
+
+func (h *UserHandler) GetUserProfile(c *fiber.Ctx) error {
+	context := fiber.Map{
+		"message": "user profile fetched",
+	}
+
+	userID := c.Locals("userID").(int)
+
+	user, err := h.userService.GetUserProfile(userID)
+	if err != nil {
+		context["message"] = err.Error()
+		return err
+	}
+
+	context["user"] = user
+	return c.Status(200).JSON(context)
+}
+
+func (h *UserHandler) RefreshTokens(c *fiber.Ctx) error {
+	context := fiber.Map{
+		"message": "refreshed access token and refresh token",
+	}
+
+	refreshToken := c.Cookies("refresh_token")
+	if refreshToken == "" {
+		fmt.Println("this")
+		context["message"] = "authentication error, probably user is logged out"
+		return c.Status(401).JSON(context)
+	}
+
+	newAccessToken, newRefreshToken, err := h.userService.RefreshTokens(refreshToken)
+	if err != nil {
+		c.Cookie(&fiber.Cookie{
+			Name:     "refresh_token",
+			Value:    "",
+			HTTPOnly: true,
+			Secure:   false,
+			SameSite: "Lax",
+			MaxAge:   -1, // expire the cookie
+		})
+		context["message"] = "session expired, please login again"
+		return c.Status(401).JSON(context)
+	}
+
+	fmt.Print("NEW TOKENS ON REFRESH: ", newRefreshToken, newAccessToken)
+
+	c.Cookie(&fiber.Cookie{
+		Name:     "refresh_token",
+		Value:    newRefreshToken,
+		HTTPOnly: true,
+		Secure:   false,
+		SameSite: "Lax",
+		MaxAge:   7 * 24 * 60 * 60,
+	})
+
+	// access token sent in response, to be stored in react state
+	context["access_token"] = newAccessToken
+
+	return c.Status(200).JSON(context)
+}
+
+func (h *UserHandler) UserLogout(c *fiber.Ctx) error {
+	fmt.Println("logout hit")
+	context := fiber.Map{
+		"message": "user successfully logged out",
+	}
+	refreshToken := c.Cookies("refresh_token")
+
+	if refreshToken != "" {
+		// clear refresh token from DB
+		_ = h.userService.LogoutUser(refreshToken)
+	}
+
+	c.Cookie(&fiber.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		HTTPOnly: true,
+		Secure:   false,
+		SameSite: "Lax",
+		MaxAge:   -1, // forces immediate expiry
+	})
 
 	return c.Status(200).JSON(context)
 }

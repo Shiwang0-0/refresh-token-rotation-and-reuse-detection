@@ -1,44 +1,70 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/useAuth";
+import { BASE_URL } from "../App";
 
-const BASE_URL="http://localhost:8000/api/"
-
-const Login = () => {
+const Auth = () => {
+    const navigate = useNavigate()
     const [state, setState] = useState("login");
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
+    const [error, setError] = useState("")
+    const [loading, setLoading] = useState(false);
 
-    const handleLogin=async (e)=>{
+    const { setUser, setAccessToken } = useAuth();
+
+    const handleAuth=async (e)=>{
         e.preventDefault()
+        setError("")
+        setLoading(true)
         const user = state === "login" ? { email, password } : { name, email, password };
         console.log("user:",user)
 
-        const url = BASE_URL + (state === "login" ? "login" : "register")
+        const endpoint = (state === "login" ? "/login" : "/register")
 
-       try{
-         const response = await fetch(url,{
-            method:"POST",
-            headers:{
-                "Content-Type":"application/json"
+        try{
+
+        // no need api wrapper, this is a public route
+        const response = await fetch(`${BASE_URL}${endpoint}`, {
+            method: "POST",
+            credentials: "include",
+            headers: {
+                "Content-Type": "application/json",
             },
-            body:JSON.stringify(user)
+            body: JSON.stringify(user)
         })
 
         const data = await response.json();
         if(!response.ok){
             throw new Error(data.message || "Something went wrong")
         }
-        console.log(data)
+        setAccessToken(data.access_token)
+        setUser(data.user)
+        console.log("login and register:",data.user)
+        navigate("/")
        }catch(err){
             console.error(err)
+            setError(err.message)
+       }finally{
+        setLoading(false)
        }
     }
 
+    if (loading){
+        return <div>Loading...</div>;
+    } 
+
     return (
-        <form onSubmit={handleLogin} className="flex flex-col gap-4 m-auto items-start p-8 py-12 w-80 sm:w-[352px] text-gray-500 rounded-lg shadow-xl border border-gray-200 bg-white" >
+        <form onSubmit={handleAuth} className="flex flex-col gap-4 m-auto items-start p-8 py-12 w-80 sm:w-[352px] text-gray-500 rounded-lg shadow-xl border border-gray-200 bg-white" >
             <p className="text-2xl font-medium m-auto">
                 <span className="text-indigo-500">User</span> {state === "login" ? "Login" : "Sign Up"}
             </p>
+            {error && (
+                <p className="text-red-500 text-sm w-full text-center bg-red-50 p-2 rounded">
+                    {error}
+                </p>
+            )}
             {state === "register" && (
                 <div className="w-full">
                     <p>Name</p>
@@ -69,4 +95,4 @@ const Login = () => {
     );
 };
 
-export default Login
+export default Auth

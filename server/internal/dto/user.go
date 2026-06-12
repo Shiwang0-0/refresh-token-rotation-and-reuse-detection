@@ -7,7 +7,6 @@ type RegisterRequest struct {
 }
 
 type RegisterResponse struct {
-	ID    int    `json:"id"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
 }
@@ -17,6 +16,7 @@ type LoginRequest struct {
 	Password string `json:"password"  validate:"required,min=6,max=50"`
 }
 
-type LoginResponse struct {
-	Name string `json:"name"`
+type UserProfileResponse struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
