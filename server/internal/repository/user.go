@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Shiwang0-0/refresh-token-rotation-and-reuse-detection/internal/models"
 )
@@ -12,9 +13,12 @@ type UserRepository interface {
 	IsEmailAlreadyTaken(string) (bool, error)
 	RegisterUser(string, string, string) (*models.User, error)
 	UserFindByEmail(string) (*models.User, error)
-	SaveRefreshToken(int, string) error
 	GetUserProfile(int) (*models.User, error)
-	ClearRefreshToken(string) error
+
+	SaveRefreshToken(userID int, refreshToken string, expiresAt time.Time) error
+	GetUserByRefreshToken(refreshToken string) (*models.User, error)
+	DeleteRefreshToken(refreshToken string) error // logout / rotation
+	DeleteAllUserSessions(userID int) error       // reuse detection
 }
 
 type userRepository struct {
@@ -63,46 +67,26 @@ func (r *userRepository) RegisterUser(name, email, passwordHash string) (*models
 }
 
 func (r *userRepository) UserFindByEmail(email string) (*models.User, error) {
-	query := `SELECT id, name, email, passwordHash, refreshToken FROM users WHERE email = ?`
+	query := `SELECT id, name, email, passwordHash FROM users WHERE email = ?`
 
 	var user models.User
-	var refreshToken sql.NullString
 
-	err := r.db.QueryRow(query, email).Scan(&user.ID, &user.Name, &user.Email, &user.PasswordHash, &refreshToken)
+	err := r.db.QueryRow(query, email).Scan(&user.ID, &user.Name, &user.Email, &user.PasswordHash)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("user not found")
 		}
 		return nil, fmt.Errorf("error finding user by email: %w", err)
 	}
-	if refreshToken.Valid {
-		user.RefreshToken = refreshToken.String
-	}
 
 	return &user, nil
 }
 
-func (r *userRepository) SaveRefreshToken(userID int, refreshToken string) error {
-	query := `UPDATE users SET refreshToken = ? WHERE id = ?`
-
-	var token interface{}
-	if refreshToken == "" {
-		token = nil
-	} else {
-		token = refreshToken
-	}
-
-	result, err := r.db.Exec(query, token, userID)
+func (r *userRepository) SaveRefreshToken(userID int, refreshToken string, expiresAt time.Time) error {
+	query := `INSERT INTO sessions(userId, refreshToken, expiresAt) VALUES (?,?,?)`
+	_, err := r.db.Exec(query, userID, refreshToken, expiresAt)
 	if err != nil {
-		return fmt.Errorf("error updating refresh token: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("error checking rows affected: %w", err)
-	}
-	if rowsAffected == 0 {
-		return fmt.Errorf("user not found")
+		return fmt.Errorf("SaveRefreshToken: %w", err)
 	}
 	return nil
 }
@@ -121,12 +105,38 @@ func (r *userRepository) GetUserProfile(userID int) (*models.User, error) {
 	return &user, nil
 }
 
-func (r *userRepository) ClearRefreshToken(refreshToken string) error {
-	query := `UPDATE users SET refreshToken = NULL WHERE refreshToken = ?`
+func (r *userRepository) GetUserByRefreshToken(refreshToken string) (*models.User, error) {
+	query := `
+        SELECT u.id, u.name, u.email FROM users u
+        INNER JOIN 
+		sessions s ON s.userId = u.id
+        WHERE s.refreshToken = ? AND s.expiresAt > NOW()`
 
-	_, err := r.db.Exec(query, refreshToken)
+	var user models.User
+	err := r.db.QueryRow(query, refreshToken).Scan(&user.ID, &user.Name, &user.Email)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
-		return fmt.Errorf("error clearing refresh token: %w", err)
+		return nil, fmt.Errorf("GetUserByRefreshToken: %w", err)
+	}
+	return &user, nil
+}
+
+func (r *userRepository) DeleteRefreshToken(refreshToken string) error {
+	_, err := r.db.Exec(`DELETE FROM sessions WHERE refreshToken = ?`, refreshToken)
+	if err != nil {
+		return fmt.Errorf("DeleteRefreshToken: %w", err)
+	}
+	return nil
+}
+
+// DeleteAllUserSessions deletes every session for a user (reuse detection)
+func (r *userRepository) DeleteAllUserSessions(userID int) error {
+	_, err := r.db.Exec(`DELETE FROM sessions WHERE userId = ?`, userID)
+	if err != nil {
+		return fmt.Errorf("DeleteAllUserSessions: %w", err)
 	}
 	return nil
 }

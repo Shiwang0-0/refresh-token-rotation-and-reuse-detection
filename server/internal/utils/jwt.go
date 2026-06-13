@@ -15,10 +15,13 @@ var (
 
 	ErrTokenExpired = errors.New("token expired")
 	ErrTokenInvalid = errors.New("token invalid")
+
+	AccessTokenTTL  = 15 * time.Minute
+	RefreshTokenTTL = 7 * 24 * time.Hour
 )
 
 func GenerateAccessToken(userID int) (string, error) {
-	expiry := time.Now().Add(3 * time.Second)
+	expiry := time.Now().Add(AccessTokenTTL)
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"exp":     expiry.Unix(),
@@ -27,10 +30,10 @@ func GenerateAccessToken(userID int) (string, error) {
 }
 
 func GenerateRefreshToken(userID int) (string, error) {
+	expiry := time.Now().Add(RefreshTokenTTL)
 	claims := jwt.MapClaims{
 		"user_id": userID,
-		// "exp":     time.Now().Add(7 * 24 * time.Hour).Unix(),
-		"exp": time.Now().Add(15 * time.Second).Unix(),
+		"exp":     expiry.Unix(),
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(refreshSecret)
 }
